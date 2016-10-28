@@ -17,7 +17,7 @@ package org.filetec.oauth2.security.repository;
 
 import java.math.BigInteger;
 import java.util.Optional;
-import org.filetec.oauth2.security.model.ApplicationOAuth2AccessToken;
+import org.filetec.oauth2.security.model.ApplicationOAuth2RefreshToken;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -27,10 +27,9 @@ import org.springframework.stereotype.Repository;
  * @author warren.nocos
  */
 @Repository
-public interface ApplicationOAuth2AccessTokenRepository
-        extends JpaRepository<ApplicationOAuth2AccessToken, BigInteger> {
+public interface ApplicationOAuth2RefreshTokenRepository
+        extends JpaRepository<ApplicationOAuth2RefreshToken, BigInteger> {
 
-    Optional<ApplicationOAuth2AccessToken> findByOauth2AuthenticationKey(
-            @Param("oauth2AuthenticationKey") String oauth2AuthenticationKey);
+    Optional<ApplicationOAuth2RefreshToken> findByValue(@Param("value") String value);
 
 }

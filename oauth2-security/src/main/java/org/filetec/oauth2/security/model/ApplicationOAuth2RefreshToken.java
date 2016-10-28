@@ -52,7 +52,8 @@ public class ApplicationOAuth2RefreshToken implements ExpiringOAuth2RefreshToken
     protected BigInteger id;
 
     @Column(name = "value",
-            nullable = false)
+            nullable = false,
+            unique = true)
     @NotNull
     protected String value;
 

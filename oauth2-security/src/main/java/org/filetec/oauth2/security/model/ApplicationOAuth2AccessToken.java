@@ -100,9 +100,15 @@ public class ApplicationOAuth2AccessToken implements OAuth2AccessToken, Serializ
     protected Date expiration;
 
     @Column(name = "value",
-            nullable = false)
+            nullable = false,
+            unique = true)
     @NotNull
     protected String value;
+
+    @Column(name = "oauth2_authentication_key",
+            nullable = false)
+    @NotNull
+    protected String oauth2AuthenticationKey;
 
     @Lob
     @Column(name = "serialized_oAuth2_authentication",
@@ -189,6 +195,14 @@ public class ApplicationOAuth2AccessToken implements OAuth2AccessToken, Serializ
 
     public void setValue(String value) {
         this.value = value;
+    }
+
+    public String getOauth2AuthenticationKey() {
+        return oauth2AuthenticationKey;
+    }
+
+    public void setOauth2AuthenticationKey(String oauth2AuthenticationKey) {
+        this.oauth2AuthenticationKey = oauth2AuthenticationKey;
     }
 
     public byte[] getSerializedOAuth2Authentication() {
