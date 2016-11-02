@@ -20,9 +20,11 @@ import java.math.BigInteger;
 import java.util.Date;
 import javax.persistence.Column;
 import javax.persistence.Entity;
+import javax.persistence.FetchType;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
 import javax.persistence.Id;
+import javax.persistence.OneToOne;
 import javax.persistence.Table;
 import javax.persistence.TableGenerator;
 import javax.persistence.Temporal;
@@ -63,6 +65,13 @@ public class ApplicationOAuth2RefreshToken implements ExpiringOAuth2RefreshToken
     @NotNull
     protected Date expiration;
 
+    @OneToOne(fetch = FetchType.LAZY,
+            optional = false,
+            mappedBy = "applicationOAuth2RefreshToken",
+            targetEntity = ApplicationOAuth2AccessToken.class)
+    @NotNull
+    protected ApplicationOAuth2AccessToken applicationOAuth2AccessToken;
+
     public BigInteger getId() {
         return id;
     }
@@ -87,6 +96,18 @@ public class ApplicationOAuth2RefreshToken implements ExpiringOAuth2RefreshToken
 
     public void setExpiration(Date expiration) {
         this.expiration = expiration;
+    }
+    
+    public boolean isExpired() {
+        return expiration != null && expiration.getTime() < System.currentTimeMillis();
+    }
+
+    public ApplicationOAuth2AccessToken getApplicationOAuth2AccessToken() {
+        return applicationOAuth2AccessToken;
+    }
+
+    public void setApplicationOAuth2AccessToken(ApplicationOAuth2AccessToken applicationOAuth2AccessToken) {
+        this.applicationOAuth2AccessToken = applicationOAuth2AccessToken;
     }
 
 }

@@ -20,7 +20,6 @@ import java.math.BigInteger;
 import java.util.Date;
 import java.util.Map;
 import java.util.Set;
-import javax.persistence.CascadeType;
 import javax.persistence.CollectionTable;
 import javax.persistence.Column;
 import javax.persistence.ConstraintMode;
@@ -79,8 +78,7 @@ public class ApplicationOAuth2AccessToken implements OAuth2AccessToken, Serializ
     @NotNull
     protected Set<String> scope;
 
-    @OneToOne(cascade = CascadeType.ALL,
-            targetEntity = ApplicationOAuth2RefreshToken.class)
+    @OneToOne(targetEntity = ApplicationOAuth2RefreshToken.class)
     @JoinColumn(foreignKey = @ForeignKey(ConstraintMode.CONSTRAINT),
             name = "application_oAuth2_refresh_token_id",
             nullable = false,
@@ -166,7 +164,7 @@ public class ApplicationOAuth2AccessToken implements OAuth2AccessToken, Serializ
 
     @Override
     public boolean isExpired() {
-        return expiration != null && expiration.before(new Date());
+        return expiration != null && expiration.getTime() < System.currentTimeMillis();
     }
 
     @Override

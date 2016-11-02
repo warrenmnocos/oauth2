@@ -20,7 +20,6 @@ import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import javax.inject.Inject;
@@ -31,9 +30,7 @@ import org.filetec.oauth2.security.repository.ApplicationOAuth2RefreshTokenRepos
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.oauth2.common.ExpiringOAuth2RefreshToken;
 import org.springframework.security.oauth2.common.OAuth2AccessToken;
-import org.springframework.security.oauth2.common.OAuth2RefreshToken;
 import org.springframework.security.oauth2.common.exceptions.InvalidGrantException;
 import org.springframework.security.oauth2.common.exceptions.InvalidTokenException;
 import org.springframework.security.oauth2.common.util.SerializationUtils;
@@ -88,36 +85,45 @@ public class ApplicationTokenServices implements AuthorizationServerTokenService
     @Override
     @Transactional
     public OAuth2AccessToken createAccessToken(OAuth2Authentication authentication) throws AuthenticationException {
-        ClientDetails clientDetails = clientDetailsService.loadClientByClientId(authentication.getOAuth2Request().getClientId());
         return applicationOAuth2AccessTokenRepository.findByOauth2AuthenticationKey(authenticationKeyGenerator.extractKey(authentication))
                 .map(applicationOAuth2Access -> Optional.of(applicationOAuth2Access)
-                .filter(ApplicationOAuth2AccessToken::isExpired)
-                .map(expiredApplicationOAuth2Access -> {
-                    // Remove expired token, should be replaced
+                .filter(theApplicationOAuth2Access -> !theApplicationOAuth2Access.isExpired())
+                // If not expired, re-store the access token in case the authentication has changed
+                .map(nonExpiredApplicationOAuth2Access -> {
+                    nonExpiredApplicationOAuth2Access.setSerializedOAuth2Authentication(SerializationUtils.serialize(authentication));
+                    applicationOAuth2AccessTokenRepository.save(nonExpiredApplicationOAuth2Access);
+                    return nonExpiredApplicationOAuth2Access.getApplicationOAuth2RefreshToken();
+                })
+                // Remove expired token, should be replaced
+                .orElseGet(() -> {
+                    ApplicationOAuth2RefreshToken applicationOAuth2RefreshToken = applicationOAuth2Access.getApplicationOAuth2RefreshToken();
+                    applicationOAuth2RefreshToken.setApplicationOAuth2AccessToken(null);
                     applicationOAuth2AccessTokenRepository.delete(applicationOAuth2Access);
-                    return expiredApplicationOAuth2Access;
-                })
-                .orElseGet(() -> {
-                    // If not expired, re-store the access token in case the authentication has changed
-                    applicationOAuth2Access.setSerializedOAuth2Authentication(SerializationUtils.serialize(authentication));
-                    applicationOAuth2AccessTokenRepository.save(applicationOAuth2Access);
-                    return applicationOAuth2Access;
+                    return applicationOAuth2RefreshToken;
                 }))
-                .flatMap(Optional::ofNullable)
-                .map(applicationOAuth2Access -> {
-                    // Only create a new refresh token if there wasn't an existing one
-                    // associated with an expired access token.
-                    // Clients might be holding existing refresh tokens, so we re-use it in
-                    // the case that the old access token
-                    // expired.
-//                    OAuth2RefreshToken oauth2RefreshToken = Optional.ofNullable(applicationOAuth2Access.getRefreshToken())
-//                            .filter(oAuth2RefreshToken -> oAuth2RefreshToken instanceof ExpiringOAuth2RefreshToken)
-//                            .map(oAuth2RefreshToken -> (ExpiringOAuth2RefreshToken) oAuth2RefreshToken)
-//                            .orElse(createRefreshToken(clientDetails));
-                    return applicationOAuth2Access;
-                })
+                .map(applicationOAuth2RefreshToken -> Optional.of(applicationOAuth2RefreshToken)
+                .filter(theApplicationOAuth2RefreshToken -> !theApplicationOAuth2RefreshToken.isExpired())
+                .map(ApplicationOAuth2RefreshToken::getApplicationOAuth2AccessToken)
+                // But the refresh token itself might need to be re-issued if it has
+                // expired.
                 .orElseGet(() -> {
-                    return null;
+                    ClientDetails clientDetails = clientDetailsService.loadClientByClientId(authentication.getOAuth2Request().getClientId());
+                    ApplicationOAuth2RefreshToken newApplicationOAuth2RefreshToken = createApplicationOAuth2RefreshToken(clientDetails);
+                    Optional.ofNullable(applicationOAuth2RefreshToken.getApplicationOAuth2AccessToken())
+                            .ifPresent(applicationOAuth2AccessToken -> {
+                                applicationOAuth2AccessToken.setApplicationOAuth2RefreshToken(newApplicationOAuth2RefreshToken);
+                                newApplicationOAuth2RefreshToken.setApplicationOAuth2AccessToken(applicationOAuth2AccessToken);
+                            });
+                    return newApplicationOAuth2RefreshToken.getApplicationOAuth2AccessToken();
+                }))
+                // Only create a new refresh token if there wasn't an existing one
+                // associated with an expired access token.
+                // Clients might be holding existing refresh tokens, so we re-use it in
+                // the case that the old access token
+                // expired.
+                .orElseGet(() -> {
+                    ClientDetails clientDetails = clientDetailsService.loadClientByClientId(authentication.getOAuth2Request().getClientId());
+                    return createApplicationOAuth2AccessToken(clientDetails, authentication, createApplicationOAuth2RefreshToken(clientDetails));
                 });
     }
 
@@ -147,20 +153,21 @@ public class ApplicationTokenServices implements AuthorizationServerTokenService
         throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
 
-    protected OAuth2RefreshToken createRefreshToken(ClientDetails clientDetails) {
+    protected ApplicationOAuth2RefreshToken createApplicationOAuth2RefreshToken(ClientDetails clientDetails) {
         return Optional.of(clientDetails)
                 .filter(theClientDetails -> theClientDetails.getAuthorizedGrantTypes().contains("refresh_token"))
-                .map(ClientDetails::getRefreshTokenValiditySeconds)
-                .filter(Objects::nonNull)
+                .map(theClientDetails -> Optional.ofNullable(theClientDetails.getRefreshTokenValiditySeconds())
+                // default 30 days
+                .orElse(60 * 60 * 24 * 30))
                 .map(refreshTokenValiditySeconds -> {
                     ApplicationOAuth2RefreshToken applicationOAuth2RefreshToken;
                     applicationOAuth2RefreshToken = new ApplicationOAuth2RefreshToken();
                     for (boolean exists = true; exists;) {
-                        String refreshTokenValue = UUID.randomUUID().toString();
-                        exists = applicationOAuth2RefreshTokenRepository.findByValue(refreshTokenValue)
+                        String hashedRefreshTokenValue = hashObject(UUID.randomUUID().toString());
+                        exists = applicationOAuth2RefreshTokenRepository.findByValue(hashedRefreshTokenValue)
                                 .map(oAuth2RefreshToken -> true)
                                 .orElseGet(() -> {
-                                    applicationOAuth2RefreshToken.setValue(refreshTokenValue);
+                                    applicationOAuth2RefreshToken.setValue(hashedRefreshTokenValue);
                                     return false;
                                 });
                     }
@@ -168,6 +175,21 @@ public class ApplicationTokenServices implements AuthorizationServerTokenService
                     return applicationOAuth2RefreshToken;
                 })
                 .orElse(null);
+    }
+
+    protected ApplicationOAuth2AccessToken createApplicationOAuth2AccessToken(ClientDetails clientDetails,
+            OAuth2Authentication authentication, ApplicationOAuth2RefreshToken applicationOAuth2RefreshToken) {
+        ApplicationOAuth2AccessToken applicationOAuth2AccessToken;
+        applicationOAuth2AccessToken = new ApplicationOAuth2AccessToken();
+        Integer accessTokenValiditySeconds = clientDetails.getAccessTokenValiditySeconds();
+        // default 12 hours.
+        applicationOAuth2AccessToken.setExpiresIn(accessTokenValiditySeconds == null ? 60 * 60 * 12 : accessTokenValiditySeconds);
+        applicationOAuth2AccessToken.setScope(authentication.getOAuth2Request().getScope());
+        applicationOAuth2AccessToken.setOauth2AuthenticationKey(authenticationKeyGenerator.extractKey(authentication));
+        applicationOAuth2AccessToken.setSerializedOAuth2Authentication(SerializationUtils.serialize(authentication));
+        applicationOAuth2AccessToken.setApplicationOAuth2RefreshToken(applicationOAuth2RefreshToken);
+        applicationOAuth2RefreshToken.setApplicationOAuth2AccessToken(applicationOAuth2AccessToken);
+        return applicationOAuth2AccessToken;
     }
 
     protected String hashObject(Object object) {
